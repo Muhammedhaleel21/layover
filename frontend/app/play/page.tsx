@@ -14,8 +14,8 @@ import {
   ShieldCheck,
   FlaskConical,
 } from "lucide-react";
-import { useGame, usedSec } from "@/lib/store";
-import { byId, haversineM, mmss, rank, score } from "@/lib/engine";
+import { useGame, usedSec, byIdFromMissions } from "@/lib/store";
+import { haversineM, mmss, rank, score } from "@/lib/engine";
 import { START } from "@/lib/data";
 const RADIUS_M = 200;
 function useNow() {
@@ -35,7 +35,8 @@ export default function Play() {
     [ans, setAns] = useState(""),
     [fb, setFb] = useState<{ t: "ok" | "bad"; m: string } | null>(null),
     [geo, setGeo] = useState(""),
-    [copied, setCopied] = useState(false);
+    [copied, setCopied] = useState(false),
+    [replanning, setReplanning] = useState(false);
   useEffect(() => setReady(true), []);
   const remSec = g.cfg ? g.cfg.minutes * 60 - usedSec(g, now) : 0;
   // Time ending: if remaining time is down to the protected buffer, stop offering missions.
@@ -54,8 +55,8 @@ export default function Play() {
       </main>
     );
   const cfg = g.cfg,
-    d = byId(g.order[Math.min(g.idx, g.order.length - 1)]),
-    budgetLeft = cfg.budget - g.spent,
+    d = g.missions.find(m => m.id === g.order[Math.min(g.idx, g.order.length - 1)]),
+    budgetLeft = cfg?.budget ? cfg.budget - g.spent : 0,
     nV = Object.keys(g.verified).length;
   const anim = (o: object) => (rm ? {} : o);
   if (g.status !== "active") {
@@ -76,7 +77,7 @@ export default function Play() {
     const text = `LAYOVER ${title}: ${nV} place${nV === 1 ? "" : "s"} discovered (${
       g.order
         .slice(0, nV)
-        .map((i) => byId(i).name)
+        .map((i) => g.missions.find(m => m.id === i)?.name || i)
         .join(", ") || "none"
     }), ${used} min, ₹${g.spent} spent, ${g.hints} hint(s), score ${sc.total} (${rank(sc.total)}). Explore the Unknown. Beat the Clock.`;
     return (
@@ -126,14 +127,17 @@ export default function Play() {
         <section className="mt-6">
           <h2 className="font-semibold">Recap</h2>
           <ul className="mt-2 list-disc pl-5 text-mist">
-            {g.order.slice(0, nV).map((i) => (
-              <li key={i}>
-                {byId(i).name} —{" "}
-                {g.verified[i] === "gps"
-                  ? "verified on location"
-                  : "demo-verified (not a real visit)"}
-              </li>
-            ))}
+            {g.order.slice(0, nV).map((i) => {
+              const mission = g.missions.find(m => m.id === i);
+              return (
+                <li key={i}>
+                  {mission?.name || i} —{" "}
+                  {g.verified[i] === "gps"
+                    ? "verified on location"
+                    : "demo-verified (not a real visit)"}
+                </li>
+              );
+            })}
             {nV === 0 && <li>No places discovered this time.</li>}
           </ul>
         </section>
@@ -164,9 +168,9 @@ export default function Play() {
       </motion.main>
     );
   }
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = g.submit(ans);
+    const res = await g.submit(ans);
     if (res === "empty") setFb({ t: "bad", m: "Type an answer first." });
     else if (res === "wrong")
       setFb({
@@ -186,6 +190,7 @@ export default function Play() {
     }
     navigator.geolocation.getCurrentPosition(
       (p) => {
+        if (!d) return;
         const m = haversineM(
           p.coords.latitude,
           p.coords.longitude,
@@ -207,7 +212,33 @@ export default function Play() {
       { enableHighAccuracy: true, timeout: 15000 },
     );
   };
-  const bb = `${d.lng - 0.006},${d.lat - 0.004},${d.lng + 0.006},${d.lat + 0.004}`;
+  
+  const handleReplan = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is required for replanning.");
+      return;
+    }
+    
+    setReplanning(true);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const success = await g.replan(position.coords.latitude, position.coords.longitude);
+          if (!success) {
+            alert("Unable to replan - no more missions fit your remaining time and budget.");
+          }
+        } catch (error) {
+          alert("Replan failed. Please try again.");
+        }
+        setReplanning(false);
+      },
+      () => {
+        alert("Location permission denied. Cannot replan without current location.");
+        setReplanning(false);
+      }
+    );
+  };
+  const bb = d ? `${d.lng - 0.006},${d.lat - 0.004},${d.lng + 0.006},${d.lat + 0.004}` : '';
   return (
     <main className="mx-auto max-w-6xl px-4 py-5">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-mist/30 pb-4">
@@ -216,7 +247,7 @@ export default function Play() {
             Case LAY-{g.startedAt.toString().slice(-5)} · {cfg.start}
           </p>
           <h1 className="font-display text-2xl">
-            Mission {g.idx + 1} of {g.order.length}: {d.title}
+            Mission {g.idx + 1} of {g.order.length}: {d?.title}
           </h1>
         </div>
         <dl className="flex gap-5" aria-live="off">
@@ -259,6 +290,10 @@ export default function Play() {
       <p className="mt-2 text-xs text-mist">
         Return buffer {cfg.buffer} min is protected. Travel and visit times are
         curated estimates, not live data. Difficulty: {cfg.difficulty}.
+        {g.adventureSource === "api" && " 🤖 AI-curated missions"}
+        {g.adventureSource === "fallback" && " 📋 Curated fallback missions"}
+        {g.adventureSource === "local" && " 🏠 Offline mode: curated missions"}
+        {g.apiWarnings.length > 0 && ` Warnings: ${g.apiWarnings.join(", ")}`}
       </p>
       <div className="mt-5 grid gap-6 lg:grid-cols-[3fr_2fr]">
         <section aria-label="Current mission">
@@ -273,11 +308,11 @@ export default function Play() {
             >
               {g.phase === "clue" ? (
                 <div className="bg-paper p-6 text-deep">
-                  <p className="italic">{d.intro}</p>
+                  <p className="italic">{d?.intro}</p>
                   <p className="mt-4 font-display text-xl leading-snug">
-                    {d.riddle}
+                    {d?.riddle}
                   </p>
-                  {g.hintsHere > 0 && (
+                  {g.hintsHere > 0 && d && (
                     <ul className="mt-4 border-l-4 border-stamp pl-3 text-sm">
                       {d.hints.slice(0, g.hintsHere).map((h) => (
                         <li key={h}>Hint: {h}</li>
@@ -318,12 +353,21 @@ export default function Play() {
                   <div className="mt-4 flex flex-wrap gap-3">
                     <button
                       className="btn border border-deep"
-                      disabled={g.hintsHere >= d.hints.length}
+                      disabled={!d || g.hintsHere >= d.hints.length}
                       onClick={g.hint}
                     >
                       <Lightbulb size={16} aria-hidden />
                       Get a hint (−15)
                     </button>
+                    {g.adventureId && (
+                      <button
+                        className="btn border border-blue-600 text-blue-600"
+                        onClick={handleReplan}
+                        disabled={replanning}
+                      >
+                        {replanning ? "Replanning..." : "Re-plan remaining missions"}
+                      </button>
+                    )}
                     <button
                       className="btn border border-stamp text-stamp"
                       onClick={() => {
@@ -346,20 +390,20 @@ export default function Play() {
                     <Check aria-hidden />
                     Destination revealed
                   </p>
-                  <h2 className="mt-1 font-display text-3xl">{d.name}</h2>
-                  <p className="mt-3">{d.story}</p>
+                  <h2 className="mt-1 font-display text-3xl">{d?.name}</h2>
+                  <p className="mt-3">{d?.story}</p>
                   <p className="mt-3">
-                    <strong>Do here:</strong> {d.activity}
+                    <strong>Do here:</strong> {d?.activity}
                   </p>
                   <p className="mt-3 text-sm">
-                    Estimates: travel {d.travelMin} min · visit {d.visitMin} min
-                    · about ₹{d.cost}
+                    Estimates: travel {d?.travelMin} min · visit {d?.visitMin} min
+                    · about ₹{d?.cost}
                   </p>
                   <a
                     className="btn-s mt-3 !border-deep !text-deep"
                     target="_blank"
                     rel="noreferrer"
-                    href={`https://www.openstreetmap.org/directions?from=${START.lat},${START.lng}&to=${d.lat},${d.lng}`}
+                    href={`https://www.openstreetmap.org/directions?from=${START.lat},${START.lng}&to=${d?.lat},${d?.lng}`}
                   >
                     <Navigation size={16} aria-hidden />
                     Open directions
@@ -408,10 +452,10 @@ export default function Play() {
           <div className="border border-mist/40">
             {g.phase === "revealed" ? (
               <iframe
-                title={`Map of ${d.name}`}
+                title={`Map of ${d?.name || 'Location'}`}
                 className="h-64 w-full"
                 loading="lazy"
-                src={`https://www.openstreetmap.org/export/embed.html?bbox=${bb}&layer=mapnik&marker=${d.lat},${d.lng}`}
+                src={`https://www.openstreetmap.org/export/embed.html?bbox=${bb}&layer=mapnik&marker=${d?.lat},${d?.lng}`}
               />
             ) : (
               <div className="flex h-64 items-center justify-center p-4 text-center text-mist">
@@ -421,18 +465,23 @@ export default function Play() {
             )}
           </div>
           <ol className="space-y-2 text-sm">
-            {g.order.map((id, i) => (
-              <li
-                key={id}
-                className={`border p-2 ${i === g.idx ? "border-amber" : "border-mist/30"}`}
-              >
-                {g.verified[id]
-                  ? `✓ ${byId(id).name} (${g.verified[id] === "gps" ? "verified" : "demo"})`
-                  : i <= g.idx && g.solved.includes(id)
-                    ? `${byId(id).name} (solved)`
-                    : `Mission ${i + 1}: locked`}
-              </li>
-            ))}
+            {g.order.map((id, i) => {
+              const mission = g.missions.find(m => m.id === id);
+              const missionName = mission?.name || `Mission ${i + 1}`;
+              
+              return (
+                <li
+                  key={id}
+                  className={`border p-2 ${i === g.idx ? "border-amber" : "border-mist/30"}`}
+                >
+                  {g.verified[id]
+                    ? `✓ ${missionName} (${g.verified[id] === "gps" ? "verified" : "demo"})`
+                    : i <= g.idx && g.solved.includes(id)
+                      ? `${missionName} (solved)`
+                      : `Mission ${i + 1}: locked`}
+                </li>
+              );
+            })}
           </ol>
         </aside>
       </div>
