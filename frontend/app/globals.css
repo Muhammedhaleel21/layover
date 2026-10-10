@@ -1,0 +1,8 @@
+@tailwind base;@tailwind components;@tailwind utilities;
+body{@apply bg-deep text-paper font-body antialiased}
+:focus-visible{outline:3px solid #E9A53B;outline-offset:2px}
+.btn{@apply inline-flex items-center justify-center gap-2 px-5 py-3 font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed}
+.btn-p{@apply btn bg-amber text-deep hover:bg-paper}
+.btn-s{@apply btn border border-mist text-paper hover:border-amber}
+.field{@apply w-full bg-ink border border-mist/50 px-3 py-3 text-paper}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
