@@ -28,9 +28,9 @@ class Config:
     EXPOSE_ANSWERS: bool = os.getenv("EXPOSE_ANSWERS", "true").lower() == "true"
     
     # API configuration
-    REQUEST_TIMEOUT: int = 10
+    REQUEST_TIMEOUT: int = 15  # Increased for comprehensive queries
     CACHE_TTL: int = 3600  # 1 hour
-    MAX_PLACES: int = 25
+    MAX_PLACES: int = 50   # Increased for comprehensive scraping
     MAX_MISSIONS: int = 8
     
     # Travel speeds (km/h)
