@@ -1,4 +1,4 @@
-# LAYOVER - Time-Aware Mystery Adventure Backend
+# LAYOVER - Time-Aware Mystery Adventure
 
 A Python FastAPI backend with LangGraph multi-agent pipeline for generating time-aware mystery adventures for travellers. Integrates with the existing Next.js frontend to provide AI-powered or fallback curated missions.
 
